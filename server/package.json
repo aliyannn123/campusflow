@@ -1,0 +1,17 @@
+{
+  "name": "campusflow-server",
+  "version": "1.0.0",
+  "description": "Backend API for CampusFlow",
+  "main": "src/server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^5.2.1"
+  }
+}
