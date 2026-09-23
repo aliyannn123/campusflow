@@ -1,8 +1,14 @@
 import { useEffect, useState } from "react";
-import SubjectCard from "./components/SubjectCard.jsx";
+
+import SubjectList from "./components/SubjectList.jsx";
+import SubjectSearch from "./components/SubjectSearch.jsx";
+import SelectedSubject from "./components/SelectedSubject.jsx";
 
 function App() {
   const [subjects, setSubjects] = useState([]);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [selectedSubject, setSelectedSubject] = useState(null);
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -30,6 +36,28 @@ function App() {
     loadSubjects();
   }, []);
 
+  const handleSelectSubject = (subject) => {
+    setSelectedSubject(subject);
+  };
+
+  const handleCloseSubject = () => {
+    setSelectedSubject(null);
+  };
+
+  const filteredSubjects = subjects.filter((subject) => {
+    const search = searchTerm.toLowerCase();
+
+    const nameMatches = subject.name
+      .toLowerCase()
+      .includes(search);
+
+    const codeMatches = subject.code
+      .toLowerCase()
+      .includes(search);
+
+    return nameMatches || codeMatches;
+  });
+
   if (loading) {
     return <p>Loading subjects...</p>;
   }
@@ -40,18 +68,32 @@ function App() {
 
   return (
     <main>
-      <h1>CampusFlow</h1>
+      <header>
+        <h1>CampusFlow</h1>
 
-      <p>My Subjects</p>
+        <p>
+          Academic
+        </p>
+      </header>
 
-      <section>
-        {subjects.map((subject) => (
-          <SubjectCard
-            key={subject.id}
-            subject={subject}
-          />
-        ))}
-      </section>
+      <SubjectSearch
+        searchTerm={searchTerm}
+        onSearchChange={setSearchTerm}
+      />
+
+      <p>
+        Showing {filteredSubjects.length} subject(s)
+      </p>
+
+      <SubjectList
+        subjects={filteredSubjects}
+        onSelectSubject={handleSelectSubject}
+      />
+
+      <SelectedSubject
+        subject={selectedSubject}
+        onClose={handleCloseSubject}
+      />
     </main>
   );
 }
