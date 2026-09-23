@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import subjects from "./data/subjects.js";
+import authRoutes from "./modules/auth/auth.routes.js";
 
 const app = express();
 
@@ -11,6 +12,7 @@ app.use(
 );
 
 app.use(express.json());
+app.use("/api/v1/auth", authRoutes);
 
 app.get("/", (req, res) => {
   res.status(200).json({
