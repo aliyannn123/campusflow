@@ -16,4 +16,25 @@ test("production refuses console email and accepts complete HTTPS delivery confi
   expect(validateEnvironment).toThrow("Production requires SMTP or HTTPS email configuration.");
   vi.stubEnv("EMAIL_MODE", "resend"); vi.stubEnv("RESEND_API_KEY", "test");
   expect(validateEnvironment).not.toThrow();
+  vi.stubEnv("EMAIL_MODE", "brevo"); vi.stubEnv("BREVO_API_KEY", "");
+  expect(validateEnvironment).toThrow("BREVO_API_KEY is required.");
+  vi.stubEnv("BREVO_API_KEY", "test");
+  expect(validateEnvironment).not.toThrow();
+  vi.stubEnv("EMAIL_FROM", "CampusFlow <noreply@example.com>");
+  expect(validateEnvironment).toThrow("plain email address");
+});
+test("Brevo sends plain-text OTP mail using API authentication and masks provider errors", async () => {
+  vi.stubEnv("EMAIL_MODE", "brevo"); vi.stubEnv("BREVO_API_KEY", "test-only-key");
+  vi.stubEnv("EMAIL_FROM", "sender@example.com"); vi.stubEnv("EMAIL_FROM_NAME", "CampusFlow");
+  const fetch = vi.fn(async () => ({ ok: true })); vi.stubGlobal("fetch", fetch);
+  await sendEmail({ to: "student@college.ac.in", subject: "Verify", text: "Code: 123456" });
+  const [url, options] = fetch.mock.calls[0];
+  expect(url).toBe("https://api.brevo.com/v3/smtp/email");
+  expect(options.headers["api-key"]).toBe("test-only-key");
+  expect(JSON.parse(options.body)).toEqual({ sender: { name: "CampusFlow", email: "sender@example.com" }, to: [{ email: "student@college.ac.in" }], subject: "Verify", textContent: "Code: 123456" });
+  fetch.mockResolvedValue({ ok: false, status: 401, text: async () => "Sensitive provider details" });
+  await expect(sendEmail({ to: "student@college.ac.in", subject: "Verify", text: "code" })).rejects.toThrow("Email provider rejected delivery (401).");
+  vi.stubEnv("BREVO_API_KEY", "");
+  await expect(sendEmail({ to: "student@college.ac.in", subject: "Verify", text: "code" })).rejects.toThrow("Brevo email delivery is not configured.");
+  expect(fetch).toHaveBeenCalledTimes(2);
 });

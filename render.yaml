@@ -20,11 +20,13 @@ services:
       - key: ALLOWED_EMAIL_DOMAIN
         value: walchandsangli.ac.in
       - key: EMAIL_MODE
-        value: resend
+        value: brevo
       - key: EMAIL_FROM
         sync: false
-      - key: RESEND_API_KEY
+      - key: BREVO_API_KEY
         sync: false
+      - key: EMAIL_FROM_NAME
+        value: CampusFlow
       - key: STORAGE_PROVIDER
         value: s3
       - key: S3_ENDPOINT
