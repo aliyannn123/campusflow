@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router";
+import { api } from "../lib/apiClient.js";
 
 function RegisterPage() {
   const navigate = useNavigate();
@@ -37,33 +38,17 @@ function RegisterPage() {
     try {
       setSubmitting(true);
 
-      const response = await fetch(
-        "http://localhost:5000/api/v1/auth/register",
-        {
-          method: "POST",
-
-          headers: {
-            "Content-Type": "application/json",
-          },
-
-          body: JSON.stringify({
+      await api("/auth/register", {
+          method: "post",
+          data: {
             name: formData.name,
             email: formData.email,
             accountType: formData.accountType,
             password: formData.password,
-          }),
-        }
-      );
+          },
+      });
 
-      const result = await response.json();
-
-      if (!response.ok) {
-        throw new Error(
-          result.message || "Registration failed."
-        );
-      }
-
-      navigate("/verify-email");
+      navigate(`/verify-email?email=${encodeURIComponent(formData.email.trim())}`);
     } catch (error) {
       setError(error.message);
     } finally {
@@ -72,7 +57,7 @@ function RegisterPage() {
   };
 
   return (
-    <main>
+    <main className="auth-card">
       <h1>Create CampusFlow Account</h1>
 
       {error && <p role="alert">{error}</p>}
@@ -102,7 +87,7 @@ function RegisterPage() {
             id="email"
             name="email"
             type="email"
-            placeholder="student@college.ac.in"
+            placeholder="student@walchandsangli.ac.in"
             value={formData.email}
             onChange={handleChange}
           />

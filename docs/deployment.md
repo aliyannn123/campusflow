@@ -1,0 +1,55 @@
+# Deploy CampusFlow on Render
+
+You currently have a Render account but no service. Nothing has been deployed by this implementation.
+
+## Create the service
+
+1. Put the reviewed code, including `render.yaml`, in your GitHub repository. Keep `server/.env` and credentials out of Git.
+2. In the Render dashboard, choose **New → Blueprint**, connect the repository, and select the branch containing these changes. Render reads the root `render.yaml`. Review the service and plan before creating it. [Blueprint guide](https://render.com/docs/infrastructure-as-code)
+3. Supply the requested environment variables in Render. Render generates SESSION_SECRET and OTP_PEPPER automatically.
+4. Deploy the Blueprint. The single Node web service builds React, runs Express, serves the SPA and hosts Socket.IO. Leave Root Directory empty if configuring a Web Service manually.
+5. After a successful deploy, copy the public `https://…onrender.com` URL for live verification.
+
+| Variable | Value |
+| --- | --- |
+| MONGODB_URI | Dedicated Atlas database connection string; authorize Render's outbound addresses in Atlas |
+| EMAIL_FROM | Sender address on a domain verified with your email provider |
+| RESEND_API_KEY | Resend sending key, entered only in Render |
+| S3_ENDPOINT | Your private S3 or R2 endpoint |
+| S3_REGION | `auto` for R2; actual bucket region for AWS S3 |
+| S3_BUCKET | Private bucket name |
+| S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY | Bucket-scoped storage credentials |
+
+EMAIL_MODE defaults to `resend`: the backend calls the provider over HTTPS. Render free web services block outbound SMTP ports 25, 465 and 587, so SMTP on those ports will not work on the free plan. If you choose a paid service and your own SMTP provider, set EMAIL_MODE=smtp and supply SMTP_HOST, SMTP_PORT, SMTP_SECURE, SMTP_USER and SMTP_PASS instead. [Render free-service limits](https://render.com/docs/free)
+
+Resend requires a verified sending domain for production delivery. You must control that domain's DNS; it need not be the college's domain. The sender domain and the allowed student registration domain are separate settings. The app still accepts only `walchandsangli.ac.in` accounts. [Resend domain verification](https://resend.com/docs/dashboard/domains/introduction), [email API](https://resend.com/docs/api-reference/emails/send-email)
+
+CLIENT_ORIGIN defaults to Render's RENDER_EXTERNAL_URL. For a custom domain, set CLIENT_ORIGIN to its HTTPS origin with no trailing slash. Do not put server secrets in VITE variables. The app refuses production startup without durable storage and email configuration.
+
+## Manual Web Service alternative
+
+Use the same environment variables, Node 24.21.0, and:
+- Build: `npm ci --prefix client --include=dev && npm run build --prefix client && npm ci --prefix server --omit=dev`
+- Start: `npm start --prefix server`
+- Health path: `/api/v1/health`
+
+## First administrator and academic setup
+
+For an empty database, run `npm run seed:academic --prefix server` from a trusted local environment pointed at the intended database. This creates illustrative AIML/CSE departments, programs, sections and Semester 5 subjects. Replace these with the college's actual structure in administration.
+
+Register, verify and complete onboarding for your institutional account. Then run `npm run admin:grant --prefix server -- your-email@walchandsangli.ac.in` against that database. The command only grants access to an existing verified account. Never seed public demo accounts into production.
+
+## Live release checks
+
+- Health endpoint returns 200; direct reloads of /home and nested workspace URLs render.
+- A real institutional email receives an OTP, verifies once, and can log in; replay fails.
+- Login persists across refresh; logout and password reset revoke old access.
+- Student, assigned faculty, coordinator and administrator permissions work.
+- A different section's content remains inaccessible through API, search and file URLs.
+- Two sessions receive realtime discussion and notification updates.
+- An uploaded file survives a service restart and remains private.
+- College timezone, academic year, sender identity and allowed domain are correct.
+
+Free services can sleep. Reminder jobs run at startup and every five minutes while awake; use an always-on service for timely reminders. The current Socket.IO implementation targets one server instance. Multiple instances require a shared socket adapter and coordinated jobs. Run `npm run cleanup:files --prefix server` periodically from a trusted configured environment to remove stale attachment records/objects.
+
+Sources: [Blueprint specification](https://render.com/docs/blueprint-spec), [Render web services](https://render.com/docs/web-services).

@@ -1,0 +1,12 @@
+import { Router } from "express";
+import { requireAuth } from "../../middleware/auth.js";
+import { csrfToken } from "../../middleware/csrf.js";
+import { toPublicUser } from "./user.utils.js";
+import { onboard } from "./onboarding.js";
+import { updateProfile } from "./profile.js";
+const router = Router();
+router.use(requireAuth);
+router.post("/me/onboarding", onboard);
+router.put("/me/profile", updateProfile);
+router.get("/me", (req, res) => res.json({ success: true, data: { user: toPublicUser(req.user), csrfToken: csrfToken(req) } }));
+export default router;
