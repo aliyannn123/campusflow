@@ -6,12 +6,12 @@ CampusFlow brings academic work and campus activity into one private college wor
 
 - Persistent accounts, emailed OTP verification, session login/logout, password reset and academic onboarding.
 - Class, subject and club memberships with server-enforced permissions.
-- Announcements, realtime discussions, replies, reactions, mentions, doubts and accepted answers.
-- Resources, private uploads, bookmarks, assignment progress and deadline reminders.
+- Announcements with optional acknowledgement analytics, realtime discussions, replies, reactions, mentions, doubts and accepted answers.
+- Resources, private uploads, bookmarks, assignment progress, faculty deadline editing and deadline reminders.
 - Weekly schedules, single-day exceptions, calendar and class polls.
-- Clubs and approvals, events with capacity limits, targeted notices and acknowledgements, placement eligibility and applied tracking, lost and found.
+- Clubs and approvals, club-managed events with membership checks and capacity limits, targeted notices with closure and acknowledgement analytics, placement eligibility and applied tracking, lost and found.
 - Student/faculty dashboards, notification preferences, search, editable profiles and light/dark responsive layouts.
-- Administration for academic structure, user approval/roles/profiles, class representatives, club leadership, campus content, moderation, audit history and college branding.
+- Paginated, searchable administration with confirmation dialogs for academic structure, user approval/roles/profiles, class representatives, club leadership, campus content, moderation, audit history and college branding.
 
 ## Local development
 

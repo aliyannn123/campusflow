@@ -1,3 +1,4 @@
+import { listFilter, paginate } from "../../lib/pagination.js";
 import { Router } from "express";
 import { z } from "zod";
 import { requireAuth, requireActive, requireRoles } from "../../middleware/auth.js";
@@ -25,7 +26,7 @@ reportRoutes.post("/", async (req, res) => {
 });
 export const moderationRoutes = Router();
 moderationRoutes.use(requireAuth, requireActive, requireRoles("COLLEGE_ADMIN"));
-moderationRoutes.get("/", async (req, res) => res.json({ data: await Report.find().sort({ createdAt: -1 }).limit(200).lean() }));
+moderationRoutes.get("/", async (req, res) => res.json(await paginate(Report, { ...listFilter(req.query, ["reason", "details"]), ...(req.query.status ? { status: z.enum(["OPEN", "RESOLVED"]).parse(req.query.status) } : {}) }, req.query)));
 moderationRoutes.put("/:itemId", async (req, res) => {
   const input = z.object({ resolutionAction: z.enum(["DISMISSED", "CONTENT_REMOVED", "USER_SUSPENDED", "CONTENT_REMOVED_AND_USER_SUSPENDED"]), resolutionNote: z.string().trim().min(2).max(1000) }).parse(req.body);
   const report = await Report.findOne({ _id: id.parse(req.params.itemId), status: "OPEN" });

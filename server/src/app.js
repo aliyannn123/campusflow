@@ -1,3 +1,4 @@
+import clubEventRoutes from "./modules/events/club-event.routes.js";
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
@@ -36,6 +37,7 @@ export function createApp({ sessionStore } = {}) {
   app.use("/api/v1/users", userRoutes);
   app.use("/api/v1/academic", academicRoutes);
   app.use("/api/v1/spaces", spaceRoutes);
+  app.use("/api/v1/spaces/:spaceId/events", clubEventRoutes);
   app.use("/api/v1/spaces/:spaceId", contentRoutes);
   app.use("/api/v1/spaces/:spaceId/schedule", scheduleRoutes);
   app.use("/api/v1", dashboardRoutes);

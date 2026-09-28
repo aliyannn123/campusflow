@@ -1,8 +1,14 @@
+import Membership from "../modules/spaces/membership.model.js";
 import { Server } from "socket.io";
 import User from "../modules/users/user.model.js";
 import { requireSpace } from "../modules/spaces/space.service.js";
 let io;
-export function emitSpace(spaceId, event = "space:changed") { io?.to("space:" + spaceId).emit(event, { spaceId: String(spaceId) }); }
+export function emitSpace(spaceId, event = "space:changed") {
+  io?.to("space:" + spaceId).emit(event, { spaceId: String(spaceId) });
+  if (io) void Membership.find({ spaceId, status: "ACTIVE" }).select("userId").then(members => {
+    for (const member of members) emitUser(member.userId, "calendar:changed");
+  }).catch(error => console.error("Calendar refresh failed:", error.name));
+}
 export function emitUser(userId, event) { io?.to("user:" + userId).emit(event); }
 export function disconnectUser(userId) { io?.in("user:" + userId).disconnectSockets(true); }
 export function disconnectSession(sessionId) { io?.in("session:" + sessionId).disconnectSockets(true); }

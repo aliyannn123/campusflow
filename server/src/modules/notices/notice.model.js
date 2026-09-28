@@ -126,11 +126,16 @@ const noticeSchema =
         required: true,
       },
 
+      closedAt: { type: Date, default: null },
+      closedById: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+      targetedUserIds: { type: [mongoose.Schema.Types.ObjectId], default: undefined, select: false },
+      targetedRecipientCount: { type: Number, default: null },
       status: {
         type: String,
 
         enum: [
           "ACTIVE",
+          "CLOSED",
           "REMOVED",
         ],
 

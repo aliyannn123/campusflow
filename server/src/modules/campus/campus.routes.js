@@ -1,3 +1,4 @@
+import { emitUser } from "../../realtime/socket.js";
 import { Router } from "express";
 import mongoose from "mongoose";
 import { z } from "zod";
@@ -5,6 +6,7 @@ import { requireAuth, requireActive } from "../../middleware/auth.js";
 import { fail } from "../../lib/errors.js";
 import { id } from "../../lib/validation.js";
 import { audienceMatches, placementEligibility } from "./eligibility.js";
+import { eventVisibility, placementVisibility, audienceFilter } from "./visibility.js";
 import Event from "../events/event.model.js";
 import Registration from "../events/event-registration.model.js";
 import Notice from "../notices/notice.model.js";
@@ -15,14 +17,15 @@ import LostFound from "../lost-found/lost-found-item.model.js";
 const router = Router();
 router.use(requireAuth, requireActive);
 router.get("/events", async (req, res) => {
-  const events = await Event.find({ status: "ACTIVE", endAt: { $gte: new Date() } }).sort({ startAt: 1 }).limit(100).lean();
+  const events = await Event.find({ $and: [{ status: "ACTIVE", endAt: { $gte: new Date() } }, await eventVisibility(req.user._id)] }).sort({ startAt: 1 }).limit(100).lean();
   const registrations = await Registration.find({ userId: req.user._id, status: "REGISTERED" }).lean();
   res.json({ data: events.map(event => ({ ...event, eligible: audienceMatches(req.user, event.eligibility), registered: registrations.some(r => String(r.eventId) === String(event._id)) })) });
 });
 router.put("/events/:itemId/registration", async (req, res) => {
   const eventId = id.parse(req.params.itemId);
+  const visibility = await eventVisibility(req.user._id);
   await mongoose.connection.transaction(async session => {
-    const event = await Event.findOne({ _id: eventId, status: "ACTIVE" }).session(session);
+    const event = await Event.findOne({ $and: [{ _id: eventId, status: "ACTIVE" }, visibility] }).session(session);
     if (!event) fail(404, "Event not found.");
     if (!event.registrationRequired || event.startAt <= new Date()) fail(400, "Registration is not open.");
     if (!audienceMatches(req.user, event.eligibility)) fail(403, "You are not eligible for this event.");
@@ -34,6 +37,7 @@ router.put("/events/:itemId/registration", async (req, res) => {
     if (!reserved.modifiedCount) fail(409, "This event is full.");
     await Registration.updateOne({ eventId, userId: req.user._id }, { $set: { status: "REGISTERED", registeredAt: new Date(), cancelledAt: null } }, { upsert: true, session });
   });
+  emitUser(req.user._id, "calendar:changed");
   res.json({ success: true });
 });
 router.delete("/events/:itemId/registration", async (req, res) => {
@@ -42,10 +46,11 @@ router.delete("/events/:itemId/registration", async (req, res) => {
     const existing = await Registration.findOneAndUpdate({ eventId, userId: req.user._id, status: "REGISTERED" }, { $set: { status: "CANCELLED", cancelledAt: new Date() } }, { session });
     if (existing) await Event.updateOne({ _id: eventId, registeredCount: { $gt: 0 } }, { $inc: { registeredCount: -1 } }, { session });
   });
+  emitUser(req.user._id, "calendar:changed");
   res.json({ success: true });
 });
 router.get("/notices", async (req, res) => {
-  const notices = await Notice.find({ status: "ACTIVE", $or: [{ expiresAt: null }, { expiresAt: { $gt: new Date() } }] }).sort({ createdAt: -1 }).limit(200).lean();
+  const notices = await Notice.find({ $and: [{ status: "ACTIVE", $or: [{ expiresAt: null }, { expiresAt: { $gt: new Date() } }] }, audienceFilter(req.user)] }).sort({ createdAt: -1 }).limit(200).lean();
   const acknowledgements = await Acknowledgement.find({ userId: req.user._id }).lean();
   res.json({ data: notices.filter(n => audienceMatches(req.user, n.audience)).map(n => ({ ...n, acknowledged: acknowledgements.some(a => String(a.noticeId) === String(n._id)) })) });
 });
@@ -57,7 +62,7 @@ router.put("/notices/:itemId/acknowledgement", async (req, res) => {
   res.json({ success: true });
 });
 router.get("/placements", async (req, res) => {
-  const records = await Placement.find({ status: "ACTIVE", deadlineAt: { $gt: new Date() } }).sort({ deadlineAt: 1 }).limit(100).lean();
+  const records = await Placement.find({ $and: [{ status: "ACTIVE", deadlineAt: { $gt: new Date() } }, placementVisibility(req.user)] }).sort({ deadlineAt: 1 }).limit(100).lean();
   const tracking = await Tracking.find({ userId: req.user._id }).lean();
   res.json({ data: records.map(record => ({ ...record, eligibilityStatus: placementEligibility(req.user, record.eligibility), applied: tracking.some(t => String(t.placementId) === String(record._id)) })) });
 });
@@ -90,4 +95,27 @@ async function ownLost(req) {
 router.patch("/lost-found/:itemId", async (req, res) => { const record = await ownLost(req); Object.assign(record, lostFields.partial().parse(req.body)); await record.save(); res.json({ data: record }); });
 router.put("/lost-found/:itemId/resolve", async (req, res) => { const record = await ownLost(req); record.status = "RESOLVED"; record.resolvedAt = new Date(); record.resolutionNote = z.string().trim().max(500).parse(req.body.resolutionNote || ""); await record.save(); res.json({ success: true }); });
 router.delete("/lost-found/:itemId", async (req, res) => { const record = await ownLost(req); record.status = "REMOVED"; await record.save(); res.json({ success: true }); });
+router.get("/:category/:itemId", async (req, res) => {
+  const category = z.enum(["events", "notices", "placements", "lost-found"]).parse(req.params.category);
+  const models = { events: Event, notices: Notice, placements: Placement, "lost-found": LostFound };
+  const conditions = [{ _id: id.parse(req.params.itemId) }];
+  if (category === "events") conditions.push(await eventVisibility(req.user._id));
+  if (category === "notices") conditions.push({ status: { $ne: "REMOVED" } }, audienceFilter(req.user));
+  if (category === "placements") conditions.push(placementVisibility(req.user));
+  if (category === "lost-found") conditions.push({ status: { $ne: "REMOVED" } });
+  let query = models[category].findOne({ $and: conditions });
+  if (category === "lost-found") query = query.populate("postedById", "name");
+  const record = await query.lean();
+  if (!record) fail(404, "Item not found.");
+  if (category === "events") {
+    record.eligible = audienceMatches(req.user, record.eligibility);
+    record.registered = !!await Registration.exists({ eventId: record._id, userId: req.user._id, status: "REGISTERED" });
+  }
+  if (category === "notices") record.acknowledged = !!await Acknowledgement.exists({ noticeId: record._id, userId: req.user._id });
+  if (category === "placements") {
+    record.eligibilityStatus = placementEligibility(req.user, record.eligibility);
+    record.applied = !!await Tracking.exists({ placementId: record._id, userId: req.user._id });
+  }
+  res.json({ data: record });
+});
 export default router;

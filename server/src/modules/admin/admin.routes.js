@@ -1,3 +1,5 @@
+import { listFilter, paginate } from "../../lib/pagination.js";
+import { acknowledgementStats } from "../notices/acknowledgement-stats.js";
 import { Router } from "express";
 import mongoose from "mongoose";
 import { z } from "zod";
@@ -22,12 +24,13 @@ import Event from "../events/event.model.js";
 import Registration from "../events/event-registration.model.js";
 import Placement from "../placements/placement.model.js";
 import Tracking from "../placements/placement-tracking.model.js";
+import Report from "../moderation/report.model.js";
 import Audit from "../moderation/audit-log.model.js";
 import Organization from "../organization/organization.model.js";
 import { getOrganization } from "../organization/organization.service.js";
 import { audienceMatches, placementEligibility } from "../campus/eligibility.js";
 import { notifyUsers } from "../notifications/notification.service.js";
-import { disconnectUser } from "../../realtime/socket.js";
+import { disconnectUser, emitUser } from "../../realtime/socket.js";
 import { updateAcademicProfile } from "./user-management.js";
 export async function audit(req, action, targetType, targetId, summary = "") {
   await Audit.create({ actorUserId: req.user._id, action, targetType, targetId, summary });
@@ -41,15 +44,17 @@ router.use(requireAuth, requireActive, (req, res, next) => {
 });
 router.put("/users/:itemId/academic-profile", updateAcademicProfile);
 router.get("/overview", async (req, res) => {
-  const [users, pendingFaculty, spaces, clubs, events] = await Promise.all([User.countDocuments(), User.countDocuments({ requestedAccountType: "FACULTY", accountStatus: "PENDING_APPROVAL" }), Space.countDocuments({ status: "ACTIVE" }), Club.countDocuments({ status: "ACTIVE" }), Event.countDocuments({ status: "ACTIVE", endAt: { $gte: new Date() } })]);
-  res.json({ data: { users, pendingFaculty, spaces, clubs, events } });
+  const [users, pendingFaculty, spaces, clubs, events, openReports, activeNotices] = await Promise.all([User.countDocuments(), User.countDocuments({ requestedAccountType: "FACULTY", accountStatus: "PENDING_APPROVAL" }), Space.countDocuments({ status: "ACTIVE" }), Club.countDocuments({ status: "ACTIVE" }), Event.countDocuments({ status: "ACTIVE", endAt: { $gte: new Date() } }), Report.countDocuments({ status: "OPEN" }), Notice.countDocuments({ status: "ACTIVE", $or: [{ expiresAt: null }, { expiresAt: { $gt: new Date() } }] })]);
+  res.json({ data: { users, pendingFaculty, spaces, clubs, events, openReports, activeNotices } });
 });
 router.get("/users", async (req, res) => {
   const filter = {};
   if (req.query.status) filter.accountStatus = z.enum(["ACTIVE", "PENDING_APPROVAL", "PENDING_EMAIL_VERIFICATION", "SUSPENDED"]).parse(req.query.status);
   if (req.query.q) { const value = z.string().max(100).parse(req.query.q).replace(/[.*+?^$\{\}()|[\]\\]/g, "\\$&"); filter.$or = [{ name: { $regex: value, $options: "i" } }, { email: { $regex: value, $options: "i" } }]; }
-  const users = await User.find(filter).sort({ createdAt: -1 }).limit(200);
-  res.json({ data: users.map(toPublicUser) });
+  Object.assign(filter, listFilter(req.query, ["name", "email"]));
+  if (req.query.role) filter.globalRoles = z.enum(["STUDENT", "FACULTY", "COLLEGE_ADMIN", "DEPARTMENT_ADMIN", "PLACEMENT_COORDINATOR"]).parse(req.query.role);
+  if (req.query.accountType) filter.requestedAccountType = z.enum(["STUDENT", "FACULTY"]).parse(req.query.accountType);
+  res.json(await paginate(User, filter, req.query, { map: toPublicUser }));
 });
 router.put("/users/:itemId/status", async (req, res) => {
   const userId = id.parse(req.params.itemId);
@@ -82,7 +87,7 @@ router.put("/organization", async (req, res) => {
   await audit(req, "ORGANIZATION_UPDATE", "ORGANIZATION", record._id);
   res.json({ data: record });
 });
-router.get("/audit", async (req, res) => res.json({ data: await Audit.find().populate("actorUserId", "name").sort({ createdAt: -1 }).limit(200).lean() }));
+router.get("/audit", async (req, res) => res.json(await paginate(Audit, listFilter(req.query, ["action", "summary"]), req.query, { populate: { path: "actorUserId", select: "name" } })));
 
 async function validateRelations(kind, input) {
   if (["programs", "subjects"].includes(kind) && !await Department.exists({ _id: input.departmentId, status: "ACTIVE" })) fail(400, "Choose an active department.");
@@ -123,16 +128,32 @@ async function synchronize(kind, record) {
   }
 }
 for (const [kind, Model] of Object.entries(models)) {
-  router.get("/" + kind, async (req, res) => res.json({ data: await Model.find().sort({ createdAt: -1 }).limit(200).lean() }));
+  router.get("/" + kind, async (req, res) => {
+    const filter = listFilter(req.query, ["name", "title", "companyName", "roleTitle", "code", "academicYear"].filter(field => Model.schema.path(field)));
+    if (req.query.status) {
+      const value = z.string().max(40).parse(req.query.status);
+      if (kind === "notices" && value === "EXPIRED") { filter.status = "ACTIVE"; filter.expiresAt = { $lte: new Date(), $ne: null }; }
+      else if (kind === "events" && value === "COMPLETED") { filter.status = "ACTIVE"; filter.endAt = { $lt: new Date() }; }
+      else filter.status = value;
+    }
+    res.json(await paginate(Model, filter, req.query));
+  });
   router.post("/" + kind, async (req, res) => {
     const input = schemas[kind].parse(req.body);
     await validateRelations(kind, input);
+    let targets;
+    if (kind === "notices") {
+      targets = (await User.find({ accountStatus: "ACTIVE", emailVerified: true, onboardingCompleted: true })).filter(u => audienceMatches(u, input.audience));
+      input.targetedUserIds = targets.map(u => u._id); input.targetedRecipientCount = targets.length;
+      if (input.status === "CLOSED") { input.closedAt = new Date(); input.closedById = req.user._id; }
+    }
     const record = await Model.create({ ...input, createdById: req.user._id, publishedById: req.user._id });
     await synchronize(kind, record);
-    if (["notices", "events", "placements"].includes(kind)) {
-      const users = await User.find({ accountStatus: "ACTIVE", onboardingCompleted: true });
+    if (["notices", "events", "placements"].includes(kind) && record.status === "ACTIVE") {
+      const users = targets || await User.find({ accountStatus: "ACTIVE", emailVerified: true, onboardingCompleted: true });
       const recipients = users.filter(user => kind === "placements" ? placementEligibility(user, record.eligibility) !== "INELIGIBLE" : audienceMatches(user, record.audience || record.eligibility));
-      await notifyUsers({ userIds: recipients.map(u => u._id), actorId: req.user._id, type: { notices: "NOTICE", events: "EVENT", placements: "PLACEMENT" }[kind], title: record.title || record.companyName + " · " + record.roleTitle, message: "A new campus update is available.", sourceId: record._id, destination: "/campus/" + kind });
+      await notifyUsers({ userIds: recipients.map(u => u._id), spaceId: record.spaceId, actorId: req.user._id, type: { notices: "NOTICE", events: "EVENT", placements: "PLACEMENT" }[kind], title: record.title || record.companyName + " · " + record.roleTitle, message: "A new campus update is available.", sourceId: record._id, destination: "/campus/" + kind + "/" + record._id });
+      for (const recipient of recipients) emitUser(recipient._id, "calendar:changed");
     }
     await audit(req, "CREATE_" + kind.toUpperCase(), kind, record._id);
     res.status(201).json({ data: record });
@@ -141,6 +162,9 @@ for (const [kind, Model] of Object.entries(models)) {
     let record = await Model.findById(id.parse(req.params.itemId));
     if (!record) fail(404, "Record not found.");
     const input = schemas[kind].parse(req.body); await validateRelations(kind, input);
+    if (kind === "events" && (input.organizerType !== record.organizerType || String(input.clubId || "") !== String(record.clubId || ""))) fail(400, "An event cannot change its organizer.");
+    if (kind === "notices" && input.status === "CLOSED" && record.status !== "CLOSED") { input.closedAt = new Date(); input.closedById = req.user._id; }
+    if (kind === "notices" && record.status === "CLOSED" && input.status === "ACTIVE") fail(400, "Publish a new notice instead of reopening a closed notice.");
     if (input.status === "INACTIVE") {
       const dependent = { departments: [Program, "departmentId"], programs: [Section, "programId"], sections: [Offering, "sectionId"], subjects: [Offering, "subjectId"] }[kind];
       if (dependent && await dependent[0].exists({ [dependent[1]]: record._id, status: "ACTIVE" })) fail(409, "Deactivate dependent academic records first.");
@@ -159,7 +183,8 @@ for (const [kind, Model] of Object.entries(models)) {
       if (kind === "events") recipients = (await Registration.find({ eventId: record._id, status: "REGISTERED" })).map(r => r.userId);
       else if (kind === "placements") recipients = (await Tracking.find({ placementId: record._id })).map(r => r.userId);
       else recipients = (await User.find({ accountStatus: "ACTIVE", onboardingCompleted: true })).filter(u => audienceMatches(u, record.audience)).map(u => u._id);
-      await notifyUsers({ userIds: recipients, actorId: req.user._id, type: { events: "EVENT", placements: "PLACEMENT", notices: "NOTICE" }[kind], title: record.title || record.companyName + " · " + record.roleTitle, message: "Updated · " + record.status.toLowerCase(), sourceId: record._id, dedupeKey: "update:" + record._id + ":" + record.updatedAt.getTime(), destination: "/campus/" + kind });
+      for (const recipient of recipients) emitUser(recipient, "calendar:changed");
+      await notifyUsers({ userIds: recipients, spaceId: record.spaceId, actorId: req.user._id, type: { events: "EVENT", placements: "PLACEMENT", notices: "NOTICE" }[kind], title: record.title || record.companyName + " · " + record.roleTitle, message: "Updated · " + record.status.toLowerCase(), sourceId: record._id, dedupeKey: "update:" + record._id + ":" + record.updatedAt.getTime(), destination: "/campus/" + kind });
     }
     await audit(req, "UPDATE_" + kind.toUpperCase(), kind, record._id);
     res.json({ data: record });
@@ -184,7 +209,11 @@ router.put("/sections/:itemId/members/:userId", async (req, res) => {
   await audit(req, "CLASS_MEMBERSHIP", "SPACE", space._id, role);
   res.json({ success: true });
 });
-router.get("/notices/:itemId/acknowledgements", async (req, res) => res.json({ data: await Acknowledgement.find({ noticeId: id.parse(req.params.itemId) }).populate("userId", "name").lean() }));
+router.get("/notices/:itemId/acknowledgements", async (req, res) => {
+  const record = await Notice.findById(id.parse(req.params.itemId)).select("+targetedUserIds");
+  if (!record) fail(404, "Notice not found.");
+  res.json(await acknowledgementStats(record, Acknowledgement, "noticeId"));
+});
 router.get("/placements/:itemId/tracking", async (req, res) => res.json({ data: await Tracking.find({ placementId: id.parse(req.params.itemId) }).populate("userId", "name email academicProfile").lean() }));
 router.get("/clubs/:itemId/members", async (req, res) => {
   const club = await Club.findById(id.parse(req.params.itemId)); if (!club) fail(404, "Club not found.");

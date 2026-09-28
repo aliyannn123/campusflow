@@ -11,7 +11,7 @@ export default function AppLayout() {
   const [error, setError] = useState("");
   const navigate = useNavigate();
   const queries = useQueryClient();
-  useEffect(() => { const socket = io(import.meta.env.VITE_SOCKET_URL || undefined, { withCredentials: true }); socket.on("notifications:changed", () => queries.invalidateQueries({ queryKey: ["notifications"] })); return () => socket.disconnect(); }, [queries]);
+  useEffect(() => { const socket = io(import.meta.env.VITE_SOCKET_URL || undefined, { withCredentials: true }); socket.on("notifications:changed", () => queries.invalidateQueries({ queryKey: ["notifications"] })); socket.on("calendar:changed", () => { for (const key of ["calendar", "dashboard", "campus"]) queries.invalidateQueries({ queryKey: [key] }); }); return () => socket.disconnect(); }, [queries]);
   const organization = useQuery({ queryKey: ["organization"], queryFn: () => api("/organization") });
   const notifications = useQuery({ queryKey: ["notifications"], queryFn: () => api("/notifications") });
   return <div className="app-shell"><aside className="sidebar"><NavLink className="brand" to="/home">CampusFlow<span>YOUR CAMPUS, CONNECTED</span></NavLink>

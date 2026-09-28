@@ -1,51 +1,46 @@
 # Implementation and verification record
 
-Source: *Design CampusFlow Intelligence*, conversation 6aa69bfc-0bb8-83ee-b840-0bff8572f3ef. Requested scope: Step 10 through the remaining roadmap. Updated 23 September 2026.
+Updated 27 September 2026. Source: *Design CampusFlow Intelligence*, conversation 6aa69bfc-0bb8-83ee-b840-0bff8572f3ef.
 
-The local implementation covers the roadmap's application features. The original missing `modules/users/user.model.js` import is fixed. Existing user work was retained. Changes are in the working tree; they have not been committed, pushed or deployed.
+## Deployment and change status
 
-| Steps | Scope | Local result |
-| --- | --- | --- |
-| 10 | MongoDB users and password hashing | Implemented; integration tests pass |
-| 11–12 | OTP, sessions, login/logout, protected routes | Implemented; replay/attempt/session/CSRF checks pass |
-| 13–16 | Academic onboarding, memberships, workspaces, announcements | Implemented; hierarchy and faculty permissions tested |
-| 17–22 | Realtime, discussion, doubts, resources, assignments, schedules | Implemented; socket, ownership, uploads, progress and concurrent exception tests |
-| 23–27 | Query architecture, dashboard, calendar, notifications, polls | Implemented; calendar/reminder/preferences/poll checks |
-| 28–34 | Clubs, events, notices, placements, lost and found, files, search | Implemented; event capacity, audience and privacy checks |
-| 35–45 | Shell/profile/settings, admin modules, moderation, branding, faculty dashboard | Implemented; role separation and browser smoke checks |
-| 46 | Authentication/security hardening and password reset | Implemented; one-time reset, session revocation and production configuration checks |
-| 47–53 | Tailwind/theme/responsive UI | Implemented; desktop and 390px mobile browser checks |
-| 54–55 | Automated testing and quality pass | 27 backend tests, 4 frontend tests, lint, production build and diff check pass |
-| 56–57 | Deployment configuration and documentation | Blueprint, CI, environment example, README and setup guide prepared; live deployment pending |
-| 58 | Repository audit | Imports/build/permissions/critical races reviewed; provider limitations documented |
-| Suggested follow-ons 59–62 | End-to-end checks, deploy verification, demo and handoff | Local role-based smoke checks and demo/handoff prepared; live deploy verification pending |
+The application was deployed on Render at https://campusflow-6jd4.onrender.com from commit `0442ffc` (Brevo support). Its health endpoint, public pages, asset consistency and anonymous access restrictions were checked during the audit. Atlas, Brevo and R2 are configured by the owner.
 
-## Verification performed
+The subsequent audit fixes are in the local working tree and are **not yet committed, pushed or deployed**. Do not treat the live site as containing these fixes until the updated commit is deployed.
 
-- Server: `npm test --prefix server` — **27 passed**, isolated MongoDB replica set, no real email delivery.
-- Client: `npm test --prefix client` — **4 passed**.
-- Client: `npm run lint --prefix client` — passed.
-- Client: `npm run build --prefix client` — passed.
-- `git diff --check` — passed.
-- Browser: student sign-in and assignment progress; faculty dashboard and announcement publishing; admin overview and targeted notice publishing; student visibility and unread notifications; profile save; dark/light themes; mobile settings/logout at 390px.
-- Live Socket.IO integration: private room denial, authorized update delivery, and logout disconnect.
-- Storage: spoofed content rejection, valid upload/download, outsider denial and deletion using local private storage.
-- Production-mode API: direct SPA route serves the built client with security headers; API responses remain JSON.
+## Audit remediation
 
-This is a targeted regression suite and browser smoke pass, not exhaustive testing of every interaction. Real SMTP/Resend delivery, S3/R2 persistence after restart, multi-browser production behavior and HTTPS cookies require the deployed environment.
+- Club event visibility is enforced in campus lists, detail pages, search, calendar and registration. Club notifications require active membership. Club leads/core teams can create, edit and cancel their club's events and view registrations.
+- Ineligible placements are filtered before result limits. Unknown eligibility is labelled; applying still requires confirmed eligibility.
+- Assigned faculty can edit assignment deadlines without losing completion records. Deadline changes send notifications, and workspace changes refresh calendars in connected user sessions.
+- Notices support closure metadata, immutable audience snapshots and acknowledgement statistics. Historical notices with no snapshot explicitly show unknown totals.
+- Announcements support optional acknowledgement, per-user status and manager-only statistics.
+- Registration preserves email-delivery failure feedback and offers resend recovery.
+- Lost & Found is included in global search. Campus results have detail routes, search and filters.
+- Admin lists and reference selectors support pagination/search, and users can be filtered by status/role. Consequential actions require confirmation. Overview includes open reports and active notices.
+- Community uses discovery/membership tabs with search. Profile is separate from settings. Content editors use dialogs; calendars show a legend. Indigo accents follow the roadmap examples.
+- Baseline auth, academic onboarding, discussions, doubts, resources, private files, schedules, polls, dashboards, moderation and branding remain implemented.
 
-## Remaining external setup
+## Verification
 
-The user clarified that only a **Render account** exists; no service has been created. Follow [deployment.md](deployment.md) to create the service, configure the database/email/storage secrets and deploy the reviewed code. Real academic records and first-administrator setup belong to that target database.
+- Backend: 35 tests covering authorization, authentication, transactions, private files, sockets, calendar refresh, club-event privacy/management, placement filtering, deadline updates, acknowledgement snapshots, pagination and Lost & Found.
+- Frontend: 7 tests covering route guards, form data/retry behavior, confirmation cancellation, paginated selection and failed email delivery feedback.
+- Client lint and production build checked; whitespace diff checked.
+- Local disposable browser preview: student/administrator sign-in, community tabs, club event creation dialog and detail route, admin overview and user controls. Event detail fits a 390px viewport.
+- All automated database tests use an isolated MongoDB replica set. Email is mocked and storage tests use local private files. The preview does not connect to production Atlas.
 
-The free Blueprint uses HTTPS email delivery because Render blocks standard SMTP ports on free services. SMTP support remains available for compatible hosting plans. No provider account, paid service, public deployment or production demo records were created.
+The local machine initially timed out starting test workers/MongoDB. The test configurations now allow longer startup/test execution and separate client tests from the production CSS compiler. No application permission or authentication checks were relaxed.
 
-## Operational bounds
+## Remaining verification and operational bounds
 
-- One Express/Socket.IO instance is supported. Multiple instances need a shared socket adapter and job coordination.
-- Reminders run while the service is awake. Free-service sleep delays them.
-- Content/list endpoints have bounded result sizes; discussion supports cursor pagination. Large-college scaling and load testing are not completed.
-- Department administrator is a stored role; it does not grant broad administration. College admins manage academic records; placement coordinators receive placement-only administration.
-- Notification delivery follows content persistence without a durable outbox. A provider/database interruption can require retry/reconciliation.
-- Cleanup removes stale file records and their objects. Bucket objects created immediately before a process crash can require a separate orphan-object audit.
-- Backups, retention policy and monitoring must be configured in the hosting/database accounts.
+These are explicit limits, not claims of completed production coverage:
+
+- After redeployment, verify actual Brevo OTP/reset delivery, HTTPS session login/logout, R2 upload/download and persistence after a Render restart, using authorized test accounts.
+- The original attachment-based visual mockup was unavailable. The reviewed text requirements informed the fixes; pixel-identical matching is not certified.
+- This is targeted regression and browser smoke coverage, not exhaustive accessibility, load or every-role/every-screen testing.
+- Free Render service sleep can delay reminders. One Express/Socket.IO instance is supported; horizontal scaling needs a shared socket adapter and job coordination.
+- General campus/content lists retain bounded result sizes; admin lists and reference selectors now paginate.
+- Notification persistence is not backed by a durable outbox; interrupted delivery can need reconciliation.
+- Production academic records, backup/retention policies and provider monitoring remain the owner's configuration.
+
+See [audit-2026-09-27.md](audit-2026-09-27.md) for the original findings and remediation notes, and [deployment.md](deployment.md) for deployment setup.

@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router";
 import { api } from "../lib/apiClient.js";
 import { useAuth, landingPath } from "../features/auth/useAuth.js";
 export default function VerifyEmailPage() {
   const [params] = useSearchParams();
+  const location = useLocation();
   const [email, setEmail] = useState(params.get("email") || "");
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
@@ -23,7 +24,7 @@ export default function VerifyEmailPage() {
     try { const result = await api("/auth/resend-verification", { method: "post", data: { email } }); setMessage(result.message); }
     catch (err) { setError(err.message); } finally { setBusy(false); }
   }
-  return <main className="auth-card"><h1>Verify your email</h1><p>Enter the six-digit code sent to your college email.</p>
+  return <main className="auth-card"><h1>Verify your email</h1><p>{location.state?.emailSent === false ? "Your account was created, but we could not send the verification email. Use Resend code to try again." : "Enter the six-digit code from your college email. If it has not arrived, request a new code."}</p>
     <form onSubmit={submit}>
       <label>College email<input type="email" autoComplete="email" value={email} onChange={event => setEmail(event.target.value)} required /></label>
       <label>Verification code<input inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} value={code} onChange={event => setCode(event.target.value)} required /></label>

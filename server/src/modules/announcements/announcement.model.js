@@ -50,6 +50,9 @@ const announcementSchema =
         default: "NORMAL",
       },
 
+      acknowledgementRequired: { type: Boolean, default: false },
+      targetedUserIds: { type: [mongoose.Schema.Types.ObjectId], default: undefined, select: false },
+      targetedRecipientCount: { type: Number, default: null },
       status: {
         type: String,
 

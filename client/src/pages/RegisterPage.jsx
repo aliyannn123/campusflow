@@ -38,7 +38,7 @@ function RegisterPage() {
     try {
       setSubmitting(true);
 
-      await api("/auth/register", {
+      const result = await api("/auth/register", {
           method: "post",
           data: {
             name: formData.name,
@@ -48,7 +48,7 @@ function RegisterPage() {
           },
       });
 
-      navigate(`/verify-email?email=${encodeURIComponent(formData.email.trim())}`);
+      navigate(`/verify-email?email=${encodeURIComponent(formData.email.trim())}`, { state: { emailSent: result.data.emailSent } });
     } catch (error) {
       setError(error.message);
     } finally {

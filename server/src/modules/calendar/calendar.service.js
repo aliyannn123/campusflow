@@ -1,3 +1,4 @@
+import { eventVisibility } from "../campus/visibility.js";
 import { getOrganization } from "../organization/organization.service.js";
 import { DateTime } from "luxon";
 import { accessibleSpaces } from "../spaces/space.service.js";
@@ -43,10 +44,10 @@ export async function calendar(userId, from, to) {
   const user = await User.findById(userId);
   const registrations = await Registration.find({ userId, status: "REGISTERED" }).select("eventId");
   const [events, placements] = await Promise.all([
-    Event.find({ _id: { $in: registrations.map(r => r.eventId) }, status: "ACTIVE", startAt: { $gte: start.toJSDate(), $lte: end.toJSDate() } }).lean(),
+    Event.find({ $and: [{ _id: { $in: registrations.map(r => r.eventId) }, status: "ACTIVE", startAt: { $gte: start.toJSDate(), $lte: end.toJSDate() } }, await eventVisibility(userId)] }).lean(),
     Placement.find({ status: "ACTIVE", deadlineAt: { $gte: start.toJSDate(), $lte: end.toJSDate() } }).lean(),
   ]);
-  for (const event of events) items.push({ id: String(event._id), type: "EVENT", title: event.title, startAt: event.startAt, endAt: event.endAt, location: event.location, destination: "/campus/events" });
-  for (const placement of placements.filter(p => user && placementEligibility(user, p.eligibility) === "ELIGIBLE")) items.push({ id: String(placement._id), type: "PLACEMENT", title: placement.companyName + " · " + placement.roleTitle, startAt: placement.deadlineAt, destination: "/campus/placements" });
+  for (const event of events) items.push({ id: String(event._id), type: "EVENT", title: event.title, startAt: event.startAt, endAt: event.endAt, location: event.location, destination: "/campus/events/" + event._id });
+  for (const placement of placements.filter(p => user && placementEligibility(user, p.eligibility) === "ELIGIBLE")) items.push({ id: String(placement._id), type: "PLACEMENT", title: placement.companyName + " · " + placement.roleTitle, startAt: placement.deadlineAt, destination: "/campus/placements/" + placement._id });
   return { timezone: zone, items: items.sort((a, b) => new Date(a.startAt) - new Date(b.startAt)) };
 }

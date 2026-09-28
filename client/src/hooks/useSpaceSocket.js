@@ -10,7 +10,7 @@ export function useSpaceSocket(spaceId) {
     const connection = io(import.meta.env.VITE_SOCKET_URL || undefined, { withCredentials: true });
     let timeout;
     connection.on("connect", () => connection.emit("space:join", spaceId));
-    connection.on("space:changed", () => { queries.invalidateQueries({ queryKey: ["space", spaceId] }); queries.invalidateQueries({ queryKey: ["dashboard"] }); });
+    connection.on("space:changed", () => { queries.invalidateQueries({ queryKey: ["space", spaceId] }); queries.invalidateQueries({ queryKey: ["dashboard"] }); queries.invalidateQueries({ queryKey: ["calendar"] }); });
     connection.on("typing", () => { setTyping(true); clearTimeout(timeout); timeout = setTimeout(() => setTyping(false), 2500); });
     socket.current = connection;
     return () => { clearTimeout(timeout); connection.disconnect(); };

@@ -42,11 +42,13 @@ export default function App() {
           <Route path="/community" element={<CommunityPage />} />
           <Route path="/campus" element={<CampusPage />} />
           <Route path="/campus/:category" element={<CampusListPage />} />
+          <Route path="/campus/:category/:itemId" element={<CampusListPage />} />
           <Route path="/admin/:section?" element={<AdminPage />} />
           <Route path="/calendar" element={<CalendarPage />} />
           <Route path="/spaces/:spaceId/:tab?" element={<SpacePage />} />
           <Route path="/notifications" element={<NotificationsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/profile" element={<SettingsPage profileOnly />} />
           <Route path="/search" element={<SearchPage />} />
         </Route>
       </Route>

@@ -1,3 +1,6 @@
+import Acknowledgement from "../announcements/acknowledgement.model.js";
+import User from "../users/user.model.js";
+import { acknowledgementStats } from "../notices/acknowledgement-stats.js";
 import Membership from "./membership.model.js";
 import { Router } from "express";
 import { z } from "zod";
@@ -36,11 +39,29 @@ async function item(Model, req, extra = {}) {
 }
 function ownOrManage(req, ownerId) { if (String(ownerId) !== String(req.user._id) && !req.access.canManage) fail(403, "You cannot change someone else's content."); }
 
-router.get("/announcements", async (req, res) => res.json({ data: await Announcement.find({ spaceId: req.params.spaceId, status: "ACTIVE" }).populate("authorId", "name").sort({ createdAt: -1 }).limit(100).lean() }));
+router.get("/announcements", async (req, res) => {
+  const records = await Announcement.find({ spaceId: req.params.spaceId, status: "ACTIVE" }).populate("authorId", "name").sort({ createdAt: -1 }).limit(100).lean();
+  const acknowledgements = await Acknowledgement.find({ userId: req.user._id, announcementId: { $in: records.map(r => r._id) } }).lean();
+  res.json({ data: records.map(record => ({ ...record, acknowledged: acknowledgements.some(a => String(a.announcementId) === String(record._id)) })) });
+});
+router.put("/announcements/:itemId/acknowledgement", async (req, res) => {
+  const record = await item(Announcement, req, { status: "ACTIVE" });
+  if (!record.acknowledgementRequired) fail(400, "This announcement does not require acknowledgement.");
+  await Acknowledgement.updateOne({ announcementId: record._id, userId: req.user._id }, { $setOnInsert: { announcementId: record._id, userId: req.user._id } }, { upsert: true });
+  emitSpace(record.spaceId); res.json({ success: true });
+});
+router.get("/announcements/:itemId/acknowledgements", async (req, res) => {
+  manager(req);
+  const record = await Announcement.findOne({ _id: id.parse(req.params.itemId), spaceId: req.params.spaceId }).select("+targetedUserIds");
+  if (!record) fail(404, "Announcement not found.");
+  res.json(await acknowledgementStats(record, Acknowledgement, "announcementId"));
+});
 router.post("/announcements", async (req, res) => {
   manager(req);
-  const input = z.object({ title, body, priority: z.enum(["NORMAL", "IMPORTANT", "URGENT"]).default("NORMAL") }).parse(req.body);
-  const record = await Announcement.create({ ...input, spaceId: req.params.spaceId, authorId: req.user._id });
+  const input = z.object({ title, body, priority: z.enum(["NORMAL", "IMPORTANT", "URGENT"]).default("NORMAL"), acknowledgementRequired: z.boolean().default(false) }).parse(req.body);
+  const members = await Membership.find({ spaceId: req.params.spaceId, status: "ACTIVE" }).select("userId");
+  const targets = await User.find({ _id: { $in: members.map(m => m.userId) }, accountStatus: "ACTIVE", emailVerified: true }).select("_id");
+  const record = await Announcement.create({ ...input, spaceId: req.params.spaceId, authorId: req.user._id, targetedUserIds: targets.map(u => u._id), targetedRecipientCount: targets.length });
   await notifySpace({ spaceId: record.spaceId, actorId: req.user._id, type: "ANNOUNCEMENT", title: record.title, sourceId: record._id, priority: record.priority, tab: "announcements" });
   emitSpace(record.spaceId); res.status(201).json({ data: record });
 });
@@ -151,12 +172,27 @@ router.post("/assignments", async (req, res) => {
   await notifySpace({ spaceId: record.spaceId, actorId: req.user._id, type: "ASSIGNMENT", title: record.title, sourceId: record._id, priority: record.priority, tab: "assignments" });
   emitSpace(record.spaceId); res.status(201).json({ data: record });
 });
+router.patch("/assignments/:itemId", async (req, res) => {
+  manager(req, true);
+  const existing = await item(Assignment, req, { status: "ACTIVE" });
+  const input = z.object({ title, instructions: body, dueAt: z.coerce.date(), priority: z.enum(["NORMAL", "IMPORTANT"]) }).partial().parse(req.body);
+  if (input.dueAt && input.dueAt <= new Date()) fail(400, "Choose a future deadline.");
+  const changed = input.dueAt && input.dueAt.getTime() !== existing.dueAt.getTime();
+  const record = await Assignment.findOneAndUpdate({ _id: existing._id, updatedAt: existing.updatedAt, status: "ACTIVE" }, { $set: input }, { returnDocument: "after", runValidators: true });
+  if (!record) fail(409, "Assignment changed. Refresh and try again.");
+  if (changed) {
+    const members = await Membership.find({ spaceId: record.spaceId, status: "ACTIVE", roles: "STUDENT" });
+    await notifyUsers({ userIds: members.map(m => m.userId), actorId: req.user._id, spaceId: record.spaceId, type: "ASSIGNMENT", title: "Deadline changed: " + record.title, message: "The assignment deadline has changed to " + record.dueAt.toISOString(), priority: "IMPORTANT", sourceId: record._id, dedupeKey: "deadline:" + record._id + ":" + record.updatedAt.getTime(), destination: "/spaces/" + record.spaceId + "/assignments" });
+  }
+  emitSpace(record.spaceId); res.json({ data: record });
+});
 router.delete("/assignments/:itemId", async (req, res) => { manager(req, true); const record = await item(Assignment, req); record.status = "CANCELLED"; await record.save(); emitSpace(record.spaceId); res.json({ success: true }); });
 router.put("/assignments/:itemId/progress", async (req, res) => {
   if (!req.access.membership.roles.includes("STUDENT")) fail(403, "Only students track assignment progress.");
   const record = await item(Assignment, req, { status: "ACTIVE" });
   const status = z.enum(["PENDING", "COMPLETED"]).parse(req.body.status);
   await AssignmentProgress.updateOne({ assignmentId: record._id, userId: req.user._id }, { $set: { status, completedAt: status === "COMPLETED" ? new Date() : null } }, { upsert: true });
+  emitSpace(record.spaceId);
   res.json({ success: true });
 });
 export default router;
